@@ -1,0 +1,11 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#146C62</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F4F7F5</item>
+        <item name="android:navigationBarColor">#F4F7F5</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <string name="accessibility_description">仅在你开启共享并确认对方连接后，执行对方发送的点击、滑动、长按、返回、主页和最近任务操作。可随时在应用或通知中停止。不会读取界面文字。</string>
+</resources>

@@ -1,0 +1,13 @@
+.gradle/
+.tools/
+local.properties
+**/build/
+*.jks
+*.apk
+**/__pycache__/
+*.pyc
+.idea/
+*.iml
+*.trace
+dist/
+docs/*controls*.png
