@@ -23,6 +23,7 @@ import org.json.JSONObject;
 import org.webrtc.RendererCommon;
 import org.webrtc.SurfaceViewRenderer;
 import java.util.ArrayList;
+import java.util.List;
 
 public final class MainActivity extends Activity {
     private static final int CAPTURE = 10, CAMERA = 11, SCAN = 12, NOTIFICATIONS = 13;
@@ -55,11 +56,12 @@ public final class MainActivity extends Activity {
         }
     };
     private boolean immersive;
-    private boolean cropVideo;
     private FrameLayout videoPane;
     private LinearLayout viewerTools;
     private TextView metrics;
     private TextView showTools;
+    private TextView controlHint;
+    private int homeTab;
     private VideoQuality selectedQuality = VideoQuality.BALANCED;
     private final Runnable statsTicker = new Runnable() {
         @Override public void run() {
@@ -110,8 +112,8 @@ public final class MainActivity extends Activity {
     private void refresh() {
         if (!resumed) return;
         Session session = app.session;
-        String key = session == null || session.closed ? "home" : session.host
-                ? "host:" + (session.identity != null) + ":" + session.approved
+        String key = session == null || session.closed ? "home:" + homeTab + ":" + ControlService.available() : session.host
+                ? "host:" + (session.identity != null) + ":" + session.approved + ":" + ControlService.available()
                 : "viewer:" + (session.rtc != null);
         if (!key.equals(screenKey) || shownSession != session) {
             releaseRenderer(); screenKey = key; shownSession = session;
@@ -133,15 +135,28 @@ public final class MainActivity extends Activity {
             setContentView(root);
             root.requestApplyInsets();
             if (!liveViewer) {
-                TextView title = label("局域互控", 28); title.setTypeface(null, Typeface.BOLD); root.addView(title);
-                root.addView(label("同一个应用 · 双向选择角色 · 局域网直连", 13));
-                status = label(app.status, 14); status.setPadding(0, dp(12), 0, dp(12)); root.addView(status);
+                LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+                TextView mark = label("●", 28); mark.setTextColor(GREEN); mark.setPadding(0, 0, dp(10), 0); header.addView(mark);
+                LinearLayout branding = column();
+                TextView title = label("局域互控", 23); title.setTypeface(null, Typeface.BOLD); branding.addView(title);
+                branding.addView(label("LANPEER  ·  本地直连", 11));
+                header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
+                root.addView(header);
+                status = label(app.status, 13); status.setTextColor(GREEN);
+                status.setPadding(dp(12), dp(8), dp(12), dp(8));
+                GradientDrawable statusBackground = new GradientDrawable();
+                statusBackground.setColor(0xFFE3F1ED); statusBackground.setCornerRadius(dp(12));
+                status.setBackground(statusBackground);
+                LinearLayout.LayoutParams statusLayout = new LinearLayout.LayoutParams(-1, -2);
+                statusLayout.topMargin = dp(10); statusLayout.bottomMargin = dp(12);
+                root.addView(status, statusLayout);
             } else status = null;
-            if ("home".equals(key)) home();
+            if (key.startsWith("home:")) home();
             else if (session.host) host(session);
             else viewer(session);
         }
         if (status != null) status.setText(app.status);
+        if (controlHint != null) controlHint.setText(app.status);
         if (session != null && session.pending && promptedSession != session) {
             promptedSession = session;
             approval = new AlertDialog.Builder(this).setTitle("允许这台设备控制？")
@@ -157,27 +172,127 @@ public final class MainActivity extends Activity {
     private void home() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout body = column(); scroll.addView(body); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        boolean wide = getResources().getConfiguration().screenWidthDp >= 600;
+        if (homeTab == 0) dashboard(body);
+        else if (homeTab == 1) devicesPage(body);
+        else settingsPage(body);
+        LinearLayout tabs = new LinearLayout(this); tabs.setGravity(Gravity.CENTER);
+        tabs.setPadding(0, dp(5), 0, dp(5));
+        for (int i = 0; i < 3; i++) {
+            final int target = i;
+            TextView tab = label(new String[]{"连接", "历史设备", "设置"}[i], 14);
+            tab.setGravity(Gravity.CENTER); tab.setMinHeight(dp(44));
+            tab.setTypeface(null, i == homeTab ? Typeface.BOLD : Typeface.NORMAL);
+            tab.setTextColor(i == homeTab ? GREEN : 0xFF63736E);
+            tab.setOnClickListener(v -> { if (homeTab != target) { homeTab = target; screenKey = ""; refresh(); } });
+            tabs.addView(tab, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        root.addView(tabs);
+    }
+
+    private void dashboard(LinearLayout body) {
+        TextView section = label("选择当前角色", 19); section.setTypeface(null, Typeface.BOLD); body.addView(section);
+        body.addView(label("两台安卓设备使用同一个安装包，随时切换控制方向。", 13));
         LinearLayout actions = body;
-        if (wide) {
+        if (getResources().getConfiguration().screenWidthDp >= 600) {
             actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL); actions.setTag("wide");
             body.addView(actions);
         }
         LinearLayout share = card(actions);
-        share.addView(label("让另一台设备控制本机", 21));
-        share.addView(label("手机和平板都可以作为被控端。开启后显示配对二维码，由你确认每次连接。", 14));
-        share.addView(button("允许其他设备控制", this::requestHost));
-        share.addView(outlinedButton("触控权限说明", GREEN, this::accessibility));
+        TextView shareIcon = label("▣  被控端", 15); shareIcon.setTextColor(GREEN); share.addView(shareIcon);
+        share.addView(label("共享本机屏幕", 21));
+        share.addView(label("显示配对二维码；每次连接都要在本机确认。", 14));
+        share.addView(button("开始共享", this::requestHost));
         LinearLayout control = card(actions);
-        control.addView(label("控制另一台安卓设备", 21));
-        control.addView(label("先让对方开启共享，再扫描对方二维码；也可手动输入连接信息。", 14));
-        control.addView(button("扫描二维码连接", this::scan));
-        control.addView(outlinedButton("手动输入连接", GREEN, this::manual));
-        LinearLayout help = card(body);
-        help.addView(label("连接前准备", 18));
-        help.addView(label("1  两台设备加入同一 Wi-Fi，或一台开启热点。\n2  在被控设备开启触控服务。\n3  同意共享整个屏幕，并确认对方连接。\n\n切换方向时先断开，再互换角色即可，无需更换 APK。", 14));
-        help.addView(outlinedButton(ControlService.available() ? "触控服务已开启 · 管理" : "开启本机触控服务", GREEN, this::accessibility));
-        help.addView(label("支持单指触控与系统导航；主控端可选全屏、铺满和画质。受保护画面可能无法显示。", 12));
+        TextView controlIcon = label("⌁  主控端", 15); controlIcon.setTextColor(GREEN); control.addView(controlIcon);
+        control.addView(label("控制另一台设备", 21));
+        control.addView(label("扫码连接更方便，也支持手动输入。", 14));
+        control.addView(button("扫码连接", this::scan));
+        control.addView(outlinedButton("手动连接", GREEN, this::manual));
+        List<KnownDevices.Device> recent = new KnownDevices(this).list();
+        TextView recentTitle = label("最近连接", 19); recentTitle.setTypeface(null, Typeface.BOLD); body.addView(recentTitle);
+        if (recent.isEmpty()) {
+            LinearLayout empty = card(body);
+            empty.addView(label("还没有历史设备", 17));
+            empty.addView(label("首次连接成功后，这里会记录设备地址与身份。临时连接码不会保存。", 13));
+        } else {
+            for (int i = 0; i < Math.min(2, recent.size()); i++) deviceCard(body, recent.get(i), false);
+            body.addView(outlinedButton("查看全部历史设备", GREEN, () -> { homeTab = 1; screenKey = ""; refresh(); }));
+        }
+    }
+
+    private void devicesPage(LinearLayout body) {
+        TextView title = label("历史设备", 20); title.setTypeface(null, Typeface.BOLD); body.addView(title);
+        body.addView(label("仅保存连接成功设备的地址和校验身份。重新连接时请输入被控端当前显示的 8 位连接码。", 13));
+        List<KnownDevices.Device> devices = new KnownDevices(this).list();
+        if (devices.isEmpty()) {
+            LinearLayout empty = card(body);
+            empty.addView(label("暂无已连接设备", 17));
+            empty.addView(label("请先在连接页扫码或手动连接。", 13));
+        } else for (KnownDevices.Device device : devices) deviceCard(body, device, true);
+    }
+
+    private void deviceCard(LinearLayout body, KnownDevices.Device device, boolean removable) {
+        LinearLayout card = card(body);
+        TextView address = label(device.name.isEmpty() ? device.address() : device.name, 18);
+        address.setTypeface(null, Typeface.BOLD); card.addView(address);
+        card.addView(label(device.address() + "  ·  " + device.identityLabel(), 12));
+        card.addView(button("使用当前连接码连接", () -> connectKnown(device)));
+        if (removable) {
+            card.addView(outlinedButton("重命名设备", GREEN, () -> renameDevice(device)));
+            card.addView(outlinedButton("移除记录", 0xFFAD4141, () -> {
+            new AlertDialog.Builder(this).setTitle("移除这台设备？")
+                    .setMessage("只删除本机保存的地址和身份记录，不影响对方设备。")
+                    .setPositiveButton("移除", (dialog, which) -> {
+                        new KnownDevices(this).forget(device); screenKey = ""; refresh();
+                    }).setNegativeButton("取消", null).show();
+            }));
+        }
+    }
+
+    private void renameDevice(KnownDevices.Device device) {
+        EditText name = new EditText(this);
+        name.setSingleLine(true); name.setHint("例如：我的手机"); name.setText(device.name);
+        name.setPadding(dp(20), dp(12), dp(20), dp(12));
+        new AlertDialog.Builder(this).setTitle("重命名历史设备").setView(name)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    new KnownDevices(this).rename(device, name.getText().toString());
+                    screenKey = ""; refresh();
+                }).setNegativeButton("取消", null).show();
+    }
+
+    private void connectKnown(KnownDevices.Device device) {
+        EditText code = new EditText(this);
+        code.setHint("被控端当前显示的 8 位连接码");
+        code.setSingleLine(true); code.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        code.setPadding(dp(20), dp(12), dp(20), dp(12));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("连接 " + device.address())
+                .setMessage("历史记录只保存设备身份；连接码每次共享都会更新。")
+                .setView(code).setPositiveButton("连接", null).setNegativeButton("取消", null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                connect(new Pairing(device.host, device.port, code.getText().toString().trim(), device.fingerprint));
+                dialog.dismiss();
+            } catch (Exception e) { code.setError("请输入当前显示的 8 位连接码"); }
+        }));
+        dialog.show();
+    }
+
+    private void settingsPage(LinearLayout body) {
+        TextView title = label("权限与安全", 20); title.setTypeface(null, Typeface.BOLD); body.addView(title);
+        LinearLayout touchCard = card(body);
+        touchCard.addView(label("触控服务", 18));
+        touchCard.addView(label(ControlService.available() ? "运行中 · 可执行远程触控" :
+                "未运行 · 共享画面可用，但远程点击和滑动不可用", 14));
+        touchCard.addView(button(ControlService.available() ? "管理触控服务" : "开启触控服务", this::accessibility));
+        touchCard.addView(label("如果系统设置显示已开启却无法触控，请先关闭再开启此服务，然后返回应用确认状态。", 12));
+        LinearLayout privacy = card(body);
+        privacy.addView(label("设备记录", 18));
+        privacy.addView(label("连接成功后只保存地址和设备校验身份。临时连接码、二维码令牌和屏幕内容均不保存在本机。", 14));
+        privacy.addView(outlinedButton("管理历史设备", GREEN, () -> { homeTab = 1; screenKey = ""; refresh(); }));
+        LinearLayout network = card(body);
+        network.addView(label("局域网连接", 18));
+        network.addView(label("两台设备需位于同一 Wi-Fi 或热点网络。被控端每次开启共享后，需要重新确认连接。", 14));
     }
 
     private void requestHost() {
@@ -235,6 +350,8 @@ public final class MainActivity extends Activity {
             });
         }
         panel.addView(label("连接请求需在本机确认。共享期间可返回桌面、打开其他应用；对方会看到屏幕内容。", 14));
+        panel.addView(label(ControlService.available() ? "触控服务运行中：对方可点击和滑动。"
+                : "触控服务未运行：对方目前只能观看画面。", 14));
         panel.addView(outlinedButton("停止共享 / 切换角色", Color.rgb(169, 55, 55), app::disconnect));
         panel.addView(outlinedButton("触控服务设置", GREEN, this::accessibility));
     }
@@ -251,7 +368,7 @@ public final class MainActivity extends Activity {
                      runOnUiThread(() -> fitVideo(videoPane));
                 }
             });
-            renderer.setScalingType(cropVideo ? RendererCommon.ScalingType.SCALE_ASPECT_FILL : RendererCommon.ScalingType.SCALE_ASPECT_FIT);
+            renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT);
             renderer.setEnableHardwareScaler(false);
             // An opaque View background can cover the SurfaceView's separate video surface.
             renderer.setBackgroundColor(Color.TRANSPARENT);
@@ -272,38 +389,29 @@ public final class MainActivity extends Activity {
 
     private void makeViewerTools(Session session) {
         viewerTools = column();
-        viewerTools.setPadding(dp(10), dp(8), dp(10), dp(8));
-        viewerTools.setBackgroundColor(0xDC14211F);
-        FrameLayout.LayoutParams top = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
-        videoPane.addView(viewerTools, top);
+        viewerTools.setPadding(dp(10), dp(6), dp(10), dp(6));
+        viewerTools.setBackgroundColor(0xFF14211F);
+        root.addView(viewerTools, 0, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL); viewerTools.addView(line);
         TextView name = lightLabel("局域互控  ·  已连接", 15); name.setTypeface(null, Typeface.BOLD);
         line.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
         line.addView(chip("画质 " + selectedQuality.title, () -> qualityMenu(session)));
-        TextView scaleButton = chip("铺满", () -> {
-            cropVideo = !cropVideo;
-            renderer.setScalingType(cropVideo ? RendererCommon.ScalingType.SCALE_ASPECT_FILL : RendererCommon.ScalingType.SCALE_ASPECT_FIT);
-            fitVideo(videoPane);
-            ((TextView)((LinearLayout)viewerTools.getChildAt(0)).getChildAt(2)).setText(cropVideo ? "完整" : "铺满");
-        });
-        line.addView(scaleButton);
         line.addView(chip("全屏", () -> { immersive = true; applyImmersive(); updateTools(); }));
         metrics = lightLabel(rendererEngine.liveStats, 12); viewerTools.addView(metrics);
+        controlHint = lightLabel(app.status, 12); viewerTools.addView(controlHint);
         LinearLayout navigation = new LinearLayout(this); navigation.setGravity(Gravity.CENTER);
         navigation.setPadding(dp(8), dp(6), dp(8), dp(8)); navigation.setBackgroundColor(0xDC14211F);
         for (String[] action : new String[][]{{"返回", "back"}, {"主页", "home"}, {"任务", "recents"}}) {
             navigation.addView(chip(action[0], () -> session.rtc.send(Session.json(action[1]))), new LinearLayout.LayoutParams(0, dp(48), 1));
         }
         navigation.addView(chip("断开", () -> { immersive = false; applyImmersive(); app.disconnect(); }), new LinearLayout.LayoutParams(0, dp(48), 1));
-        videoPane.addView(navigation, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        root.addView(navigation, new LinearLayout.LayoutParams(-1, -2));
         viewerTools.setTag(navigation);
-        showTools = lightLabel("退出全屏 / 工具", 13);
+        showTools = lightLabel("完整画面  ·  显示工具", 13);
         showTools.setGravity(Gravity.CENTER); showTools.setPadding(dp(12), dp(8), dp(12), dp(8));
-        showTools.setBackgroundColor(0xD9223330);
+        showTools.setBackgroundColor(0xFF223330);
         showTools.setOnClickListener(v -> { immersive = false; applyImmersive(); updateTools(); });
-        FrameLayout.LayoutParams showLayout = new FrameLayout.LayoutParams(-2, dp(42), Gravity.TOP | Gravity.RIGHT);
-        showLayout.setMargins(0, dp(8), dp(8), 0);
-        videoPane.addView(showTools, showLayout);
+        root.addView(showTools, new LinearLayout.LayoutParams(-1, dp(42)));
         updateTools();
     }
 
@@ -343,12 +451,6 @@ public final class MainActivity extends Activity {
         if (renderer == null || rendererEngine == null || renderer.getParent() != pane) return;
         int vw = rendererEngine.videoWidth, vh = rendererEngine.videoHeight;
         if (vw <= 0 || vh <= 0 || pane.getWidth() <= 0 || pane.getHeight() <= 0) return;
-        if (cropVideo) {
-            FrameLayout.LayoutParams old = (FrameLayout.LayoutParams) renderer.getLayoutParams();
-            if (old.width != pane.getWidth() || old.height != pane.getHeight())
-                renderer.setLayoutParams(new FrameLayout.LayoutParams(pane.getWidth(), pane.getHeight(), Gravity.CENTER));
-            return;
-        }
         float scale = Math.min((float) pane.getWidth() / vw, (float) pane.getHeight() / vh);
         int width = Math.max(1, Math.round(vw * scale)), height = Math.max(1, Math.round(vh * scale));
         FrameLayout.LayoutParams layout = (FrameLayout.LayoutParams) renderer.getLayoutParams();
@@ -362,10 +464,7 @@ public final class MainActivity extends Activity {
         if (event.getPointerCount() != 1 || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
             finishStroke(); return true;
         }
-        float[] p = cropVideo
-                ? TouchGeometry.normalizeCrop(event.getX(), event.getY(), renderer.getWidth(), renderer.getHeight(),
-                        session.rtc.videoWidth, session.rtc.videoHeight)
-                : TouchGeometry.normalize(event.getX(), event.getY(), renderer.getWidth(), renderer.getHeight(),
+        float[] p = TouchGeometry.normalize(event.getX(), event.getY(), renderer.getWidth(), renderer.getHeight(),
                         session.rtc.videoWidth, session.rtc.videoHeight);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -478,7 +577,7 @@ public final class MainActivity extends Activity {
         if (rendererEngine != null) rendererEngine.attachRenderer(null);
         if (renderer != null) { renderer.release(); renderer = null; }
         rendererEngine = null;
-        videoPane = null; viewerTools = null; metrics = null; showTools = null;
+        videoPane = null; viewerTools = null; metrics = null; showTools = null; controlHint = null;
     }
 
     private Bitmap qr(String value) {

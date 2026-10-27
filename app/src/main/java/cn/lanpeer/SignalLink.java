@@ -133,7 +133,10 @@ public final class SignalLink {
             }
             @Override public void onError(Exception error) {
                 android.util.Log.e("LanPeer", "Signaling client error", error);
-                app.main.post(() -> { if (!stopped) listener.closed("连接失败，请核对同一局域网、地址与设备校验码"); });
+                app.main.post(() -> { if (!stopped) listener.closed(error instanceof java.net.SocketTimeoutException
+                        || error instanceof java.net.NoRouteToHostException
+                        ? "无法访问对方设备：同一 Wi-Fi 可能开启了设备隔离，可改用手机热点或允许设备互访"
+                        : "连接失败，请核对同一局域网、地址与设备校验码"); });
             }
         };
         client.setSocketFactory(TlsIdentity.pinnedClient(pairing.fingerprint).getSocketFactory());

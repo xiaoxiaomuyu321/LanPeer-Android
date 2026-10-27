@@ -17,6 +17,7 @@ public final class Session implements SignalLink.Listener {
     public boolean pending;
     public boolean approved;
     public boolean closed;
+    public Pairing pairing;
     private Intent capturePermission;
 
     public Session(PeerApp app, boolean host) {
@@ -49,6 +50,7 @@ public final class Session implements SignalLink.Listener {
     }
 
     public void startClient(Pairing pairing) {
+        this.pairing = pairing;
         app.publish("正在连接 " + pairing.host + "…");
         try { link.connect(pairing); }
         catch (Exception e) { fail("无法连接：" + e.getClass().getSimpleName()); }
@@ -108,6 +110,7 @@ public final class Session implements SignalLink.Listener {
     public void close() {
         if (closed) return;
         closed = true; approved = false; pending = false;
+        ControlService.cancelSession(this);
         capturePermission = null;
         // Tell the UI to release its renderer before disposing the shared EGL context.
         if (app.listener != null) app.listener.run();

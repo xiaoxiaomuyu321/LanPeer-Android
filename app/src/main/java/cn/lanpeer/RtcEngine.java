@@ -36,6 +36,7 @@ public final class RtcEngine implements PeerConnection.Observer, DisplayManager.
     private int captureWidth, captureHeight;
     private VideoQuality quality = VideoQuality.BALANCED;
     private long lastStatsAt, lastDecoded, lastBytes;
+    private long lastControlRejectAt;
     public volatile String liveStats = "等待视频统计…";
     public volatile int videoWidth, videoHeight;
 
@@ -211,8 +212,9 @@ public final class RtcEngine implements PeerConnection.Observer, DisplayManager.
             @Override public void onStateChange() {
                 app.main.post(() -> {
                     if (!disposed && channel.state() == DataChannel.State.OPEN) {
+                        if (!session.host && session.pairing != null) new KnownDevices(app).remember(session.pairing);
                         app.publish(session.host ? "对方已连接，正在共享屏幕；可在通知中随时停止。" : "已连接，可直接触摸画面控制对方。");
-                        if (session.host) send(Session.json("controlStatus", "enabled", ControlService.available()));
+                        if (session.host) sendControlStatus(ControlService.available(), false);
                     }
                 });
             }
@@ -230,9 +232,16 @@ public final class RtcEngine implements PeerConnection.Observer, DisplayManager.
                             boolean accepted = ControlService.execute(app, session, message);
                             if (!"stroke".equals(message.optString("type")))
                                 android.util.Log.i("LanPeer", "Control " + message.optString("type") + ": " + accepted);
-                            if (!accepted) send(Session.json("controlStatus", "enabled", ControlService.available(), "rejected", true));
-                        } else if ("controlStatus".equals(message.optString("type")) && !message.optBoolean("enabled")) {
-                            app.publish("已连接画面；对方未开启触控服务，目前仅可观看。");
+                            if (!accepted && System.currentTimeMillis() - lastControlRejectAt > 1200) {
+                                lastControlRejectAt = System.currentTimeMillis();
+                                sendControlStatus(ControlService.available(), true);
+                            }
+                        } else if ("controlStatus".equals(message.optString("type"))) {
+                            if (!message.optBoolean("enabled"))
+                                app.publish("已连接画面；被控端触控服务未运行，请在被控端设置页开启。");
+                            else if (message.optBoolean("rejected"))
+                                app.publish("本次触控未执行；请重试，持续失败时重启被控端触控服务。");
+                            else app.publish("已连接，远程触控服务就绪。");
                         }
                     } catch (Exception ignored) { }
                 });
@@ -243,6 +252,10 @@ public final class RtcEngine implements PeerConnection.Observer, DisplayManager.
     public boolean send(JSONObject message) {
         return !disposed && channel != null && channel.state() == DataChannel.State.OPEN && channel.bufferedAmount() < 65536
                 && channel.send(new DataChannel.Buffer(ByteBuffer.wrap(message.toString().getBytes(StandardCharsets.UTF_8)), false));
+    }
+
+    public void sendControlStatus(boolean enabled, boolean rejected) {
+        if (session.host) send(Session.json("controlStatus", "enabled", enabled, "rejected", rejected));
     }
 
     public synchronized void attachRenderer(SurfaceViewRenderer value) { renderer = value; }

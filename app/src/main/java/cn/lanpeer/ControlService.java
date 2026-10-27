@@ -29,10 +29,38 @@ public final class ControlService extends AccessibilityService {
     }
 
     public static boolean available() { return instance != null; }
-    @Override protected void onServiceConnected() { instance = this; }
+    @Override protected void onServiceConnected() {
+        instance = this;
+        PeerApp app = (PeerApp) getApplication();
+        if (app.session != null && app.session.host && app.session.rtc != null)
+            app.session.rtc.sendControlStatus(true, false);
+        app.publish("触控服务已就绪，可执行远程点击和滑动。");
+    }
     @Override public void onAccessibilityEvent(AccessibilityEvent event) { }
-    @Override public void onInterrupt() { }
-    @Override public void onDestroy() { if (instance == this) instance = null; super.onDestroy(); }
+    @Override public void onInterrupt() { resetStroke(); }
+    @Override public void onDestroy() {
+        if (instance == this) instance = null;
+        resetStroke();
+        PeerApp app = (PeerApp) getApplication();
+        if (app.session != null && app.session.host && app.session.rtc != null)
+            app.session.rtc.sendControlStatus(false, false);
+        app.publish("触控服务已停止；远端目前只能观看画面。");
+        super.onDestroy();
+    }
+
+    public static void cancelSession(Session source) {
+        ControlService service = instance;
+        if (service != null && service.strokeSession == source) service.resetStroke();
+    }
+
+    private void resetStroke() {
+        strokes.clear(); continuation = null; strokeBusy = false; strokeSession = null;
+    }
+
+    private void reportCancelled(Session source) {
+        if (source != null && !source.closed && source.rtc != null)
+            source.rtc.sendControlStatus(true, true);
+    }
 
     public static boolean execute(PeerApp app, Session source, JSONObject command) {
         ControlService service = instance;
@@ -72,7 +100,9 @@ public final class ControlService extends AccessibilityService {
                             new GestureDescription.StrokeDescription(path, 0, duration)).build(),
                             new GestureResultCallback() {
                                 @Override public void onCompleted(GestureDescription gesture) { gestureBusy = false; }
-                                @Override public void onCancelled(GestureDescription gesture) { gestureBusy = false; }
+                                @Override public void onCancelled(GestureDescription gesture) {
+                                    gestureBusy = false; reportCancelled(source);
+                                }
                             }, null);
                     if (!accepted) gestureBusy = false;
                     return accepted;
@@ -115,6 +145,7 @@ public final class ControlService extends AccessibilityService {
     private void pumpStroke() {
         if (strokeBusy || strokes.isEmpty()) return;
         StrokePart part = strokes.removeFirst();
+        Session active = strokeSession;
         boolean last = "end".equals(part.phase);
         try {
             GestureDescription.StrokeDescription next = "start".equals(part.phase)
@@ -124,15 +155,18 @@ public final class ControlService extends AccessibilityService {
             strokeBusy = true;
             boolean accepted = dispatchGesture(new GestureDescription.Builder().addStroke(next).build(), new GestureResultCallback() {
                 @Override public void onCompleted(GestureDescription gesture) {
+                    if (strokeSession != active) return;
                     strokeBusy = false;
                     if (last) { continuation = null; strokeSession = null; strokes.clear(); }
                     else pumpStroke();
                 }
                 @Override public void onCancelled(GestureDescription gesture) {
-                    strokeBusy = false; continuation = null; strokeSession = null; strokes.clear();
+                    if (strokeSession != active) return;
+                    Session failed = strokeSession;
+                    resetStroke(); reportCancelled(failed);
                 }
             }, null);
-            if (!accepted) { strokeBusy = false; continuation = null; strokeSession = null; strokes.clear(); }
-        } catch (Exception e) { strokeBusy = false; continuation = null; strokeSession = null; strokes.clear(); }
+            if (!accepted) { Session failed = strokeSession; resetStroke(); reportCancelled(failed); }
+        } catch (Exception e) { Session failed = strokeSession; resetStroke(); reportCancelled(failed); }
     }
 }

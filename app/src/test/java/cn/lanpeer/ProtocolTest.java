@@ -38,11 +38,9 @@ public final class ProtocolTest {
         assertArrayEquals(new float[]{0.5f, 0.5f}, TouchGeometry.normalize(400, 600, 800, 1200, 1920, 1080), 0.001f);
     }
 
-    @Test public void cropModeMapsVisibleAreaWithoutTouchingHiddenEdges() {
-        assertArrayEquals(new float[]{0.5f, 0.5f}, TouchGeometry.normalizeCrop(600, 400, 1200, 800, 1080, 1920), 0.001f);
-        assertTrue(TouchGeometry.normalizeCrop(600, 0, 1200, 800, 1080, 1920)[1] > 0f);
-        assertTrue(TouchGeometry.normalizeCrop(600, 800, 1200, 800, 1080, 1920)[1] < 1f);
-        assertNull(TouchGeometry.normalizeCrop(0, 0, 0, 0, 1080, 1920));
+    @Test public void fittedVideoKeepsBothFarEdgesReachable() {
+        assertArrayEquals(new float[]{0f, 0f}, TouchGeometry.normalize(375, 0, 1200, 800, 1080, 1920), 0.001f);
+        assertArrayEquals(new float[]{1f, 1f}, TouchGeometry.normalize(825, 800, 1200, 800, 1080, 1920), 0.001f);
     }
 
     @Test public void excludesCellularAndVpnInvitations() {
