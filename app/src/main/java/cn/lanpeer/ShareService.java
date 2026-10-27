@@ -5,11 +5,13 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 public final class ShareService extends Service {
     static ShareService instance;
     private static final String CHANNEL = "screen-sharing";
     private Session owned;
+    private PowerManager.WakeLock screenWakeLock;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -36,6 +38,7 @@ public final class ShareService extends Service {
             owned = new Session(app, true);
             app.session = owned;
             owned.startHost(permission);
+            keepScreenAwake(owned);
         } catch (Exception e) {
             app.publish("共享服务启动失败，请重新授权屏幕共享");
             stopSelf();
@@ -55,8 +58,26 @@ public final class ShareService extends Service {
     }
 
     void updateNotification(String text) { getSystemService(NotificationManager.class).notify(1, notification(text)); }
+    @SuppressWarnings("deprecation")
+    void keepScreenAwake(Session session) {
+        if (owned != session || screenWakeLock != null) return;
+        // The activity flag stops working when the controller opens another app on this device.
+        // Keep the host screen lit while sharing is active, including before approval.
+        PowerManager power = getSystemService(PowerManager.class);
+        if (power == null) return;
+        screenWakeLock = power.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "LanPeer:activeShareScreen");
+        screenWakeLock.setReferenceCounted(false);
+        screenWakeLock.acquire();
+    }
+
+    private void releaseScreenWakeLock() {
+        if (screenWakeLock == null) return;
+        if (screenWakeLock.isHeld()) screenWakeLock.release();
+        screenWakeLock = null;
+    }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public void onDestroy() {
+        releaseScreenWakeLock();
         instance = null;
         PeerApp app = (PeerApp) getApplication();
         if (owned != null && app.session == owned) app.disconnect();

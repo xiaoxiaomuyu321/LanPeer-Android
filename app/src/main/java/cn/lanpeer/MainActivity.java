@@ -57,6 +57,7 @@ public final class MainActivity extends Activity {
     };
     private boolean immersive;
     private FrameLayout videoPane;
+    private FrameLayout videoStage;
     private LinearLayout viewerTools;
     private TextView metrics;
     private TextView showTools;
@@ -75,7 +76,6 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         app = (PeerApp) getApplication();
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     @Override public void onResume() {
@@ -112,6 +112,8 @@ public final class MainActivity extends Activity {
     private void refresh() {
         if (!resumed) return;
         Session session = app.session;
+        getWindow().setFlags(session != null && !session.closed ? WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON : 0,
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         String key = session == null || session.closed ? "home:" + homeTab + ":" + ControlService.available() : session.host
                 ? "host:" + (session.identity != null) + ":" + session.approved + ":" + ControlService.available()
                 : "viewer:" + (session.rtc != null);
@@ -349,7 +351,7 @@ public final class MainActivity extends Activity {
                 }
             });
         }
-        panel.addView(label("连接请求需在本机确认。共享期间可返回桌面、打开其他应用；对方会看到屏幕内容。", 14));
+        panel.addView(label("连接请求需在本机确认。共享期间可返回桌面、打开其他应用；对方会看到屏幕内容。开启共享后屏幕保持点亮，手动按电源键仍可锁屏。", 14));
         panel.addView(label(ControlService.available() ? "触控服务运行中：对方可点击和滑动。"
                 : "触控服务未运行：对方目前只能观看画面。", 14));
         panel.addView(outlinedButton("停止共享 / 切换角色", Color.rgb(169, 55, 55), app::disconnect));
@@ -373,7 +375,12 @@ public final class MainActivity extends Activity {
             // An opaque View background can cover the SurfaceView's separate video surface.
             renderer.setBackgroundColor(Color.TRANSPARENT);
             videoPane.addView(renderer, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
-            root.addView(videoPane, new LinearLayout.LayoutParams(-1, 0, 1));
+            videoStage = new FrameLayout(this);
+            videoStage.setBackgroundColor(Color.BLACK);
+            FrameLayout.LayoutParams videoLayout = new FrameLayout.LayoutParams(-1, -1);
+            videoLayout.rightMargin = dp(64);
+            videoStage.addView(videoPane, videoLayout);
+            root.addView(videoStage, new LinearLayout.LayoutParams(-1, 0, 1));
             videoPane.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> fitVideo(videoPane));
             rendererEngine.attachRenderer(renderer);
             renderer.setOnTouchListener((view, event) -> touch(session, event));
@@ -399,20 +406,42 @@ public final class MainActivity extends Activity {
         line.addView(chip("全屏", () -> { immersive = true; applyImmersive(); updateTools(); }));
         metrics = lightLabel(rendererEngine.liveStats, 12); viewerTools.addView(metrics);
         controlHint = lightLabel(app.status, 12); viewerTools.addView(controlHint);
-        LinearLayout navigation = new LinearLayout(this); navigation.setGravity(Gravity.CENTER);
-        navigation.setPadding(dp(8), dp(6), dp(8), dp(8)); navigation.setBackgroundColor(0xDC14211F);
-        for (String[] action : new String[][]{{"返回", "back"}, {"主页", "home"}, {"任务", "recents"}}) {
-            navigation.addView(chip(action[0], () -> session.rtc.send(Session.json(action[1]))), new LinearLayout.LayoutParams(0, dp(48), 1));
+        FrameLayout navigation = new FrameLayout(this);
+        navigation.setBackgroundColor(0xFF14211F);
+        LinearLayout keys = new LinearLayout(this); keys.setGravity(Gravity.CENTER);
+        navigation.addView(keys, new FrameLayout.LayoutParams(dp(216), dp(52), Gravity.CENTER));
+        String[][] actions = {{"◀", "返回", "back"}, {"○", "主页", "home"}, {"□", "最近任务", "recents"}};
+        for (String[] action : actions) {
+            keys.addView(navKey(action[0], action[1], () -> session.rtc.send(Session.json(action[2]))),
+                    new LinearLayout.LayoutParams(dp(72), dp(48)));
         }
-        navigation.addView(chip("断开", () -> { immersive = false; applyImmersive(); app.disconnect(); }), new LinearLayout.LayoutParams(0, dp(48), 1));
-        root.addView(navigation, new LinearLayout.LayoutParams(-1, -2));
-        viewerTools.setTag(navigation);
-        showTools = lightLabel("完整画面  ·  显示工具", 13);
-        showTools.setGravity(Gravity.CENTER); showTools.setPadding(dp(12), dp(8), dp(12), dp(8));
-        showTools.setBackgroundColor(0xFF223330);
+        root.addView(navigation, new LinearLayout.LayoutParams(-1, dp(56)));
+        showTools = lightLabel("工具", 13);
+        showTools.setGravity(Gravity.CENTER);
+        showTools.setPadding(dp(10), 0, dp(10), 0);
         showTools.setOnClickListener(v -> { immersive = false; applyImmersive(); updateTools(); });
-        root.addView(showTools, new LinearLayout.LayoutParams(-1, dp(42)));
+        FrameLayout.LayoutParams toolsLayout = new FrameLayout.LayoutParams(-2, dp(48), Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        toolsLayout.leftMargin = dp(8);
+        navigation.addView(showTools, toolsLayout);
+        TextView disconnect = lightLabel("断开", 13);
+        disconnect.setGravity(Gravity.CENTER); disconnect.setContentDescription("断开远程连接");
+        GradientDrawable floatingBackground = new GradientDrawable();
+        floatingBackground.setColor(0xFFAD4141); floatingBackground.setCornerRadius(dp(28));
+        disconnect.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(0x44FFFFFF), floatingBackground, null));
+        disconnect.setElevation(dp(8));
+        disconnect.setOnClickListener(v -> { immersive = false; applyImmersive(); app.disconnect(); });
+        FrameLayout.LayoutParams floatingLayout = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.RIGHT | Gravity.BOTTOM);
+        floatingLayout.rightMargin = dp(6); floatingLayout.bottomMargin = dp(16);
+        videoStage.addView(disconnect, floatingLayout);
         updateTools();
+    }
+
+    private TextView navKey(String symbol, String description, Runnable action) {
+        TextView key = lightLabel(symbol, 24);
+        key.setGravity(Gravity.CENTER); key.setPadding(0, 0, 0, 0);
+        key.setContentDescription(description); key.setOnClickListener(v -> action.run());
+        return key;
     }
 
     private void qualityMenu(Session session) {
@@ -428,7 +457,6 @@ public final class MainActivity extends Activity {
     private void updateTools() {
         if (viewerTools == null) return;
         viewerTools.setVisibility(immersive ? View.GONE : View.VISIBLE);
-        ((View)viewerTools.getTag()).setVisibility(immersive ? View.GONE : View.VISIBLE);
         showTools.setVisibility(immersive ? View.VISIBLE : View.GONE);
     }
 
@@ -577,7 +605,7 @@ public final class MainActivity extends Activity {
         if (rendererEngine != null) rendererEngine.attachRenderer(null);
         if (renderer != null) { renderer.release(); renderer = null; }
         rendererEngine = null;
-        videoPane = null; viewerTools = null; metrics = null; showTools = null; controlHint = null;
+        videoPane = null; videoStage = null; viewerTools = null; metrics = null; showTools = null; controlHint = null;
     }
 
     private Bitmap qr(String value) {
